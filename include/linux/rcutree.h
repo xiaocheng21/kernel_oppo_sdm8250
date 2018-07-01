@@ -48,7 +48,10 @@ static inline void rcu_virt_note_context_switch(int cpu)
 #ifdef CONFIG_PREEMPT_RT_FULL
 # define synchronize_rcu_bh	synchronize_rcu
 #else
-void synchronize_rcu_bh(void);
+static inline void synchronize_rcu_bh(void)
+{
+	synchronize_rcu();
+}
 #endif
 void synchronize_sched_expedited(void);
 void synchronize_rcu_expedited(void);
@@ -73,7 +76,7 @@ void kfree_call_rcu(struct rcu_head *head, rcu_callback_t func);
  */
 static inline void synchronize_rcu_bh_expedited(void)
 {
-	synchronize_sched_expedited();
+	synchronize_rcu_expedited();
 }
 
 void rcu_barrier(void);
