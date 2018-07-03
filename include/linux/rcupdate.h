@@ -50,20 +50,14 @@
 
 /* Exported common interfaces */
 
-#ifdef CONFIG_TINY_RCU
-#define	call_rcu	call_rcu_sched
-#else
-void call_rcu(struct rcu_head *head, rcu_callback_t func);
+#ifndef CONFIG_TINY_RCU
+void synchronize_sched(void);
+void call_rcu_sched(struct rcu_head *head, rcu_callback_t func);
 #endif
 
-#ifdef CONFIG_PREEMPT_RT_FULL
-#define call_rcu_bh	call_rcu
-#else
-void call_rcu_bh(struct rcu_head *head, rcu_callback_t func);
-#endif
-void call_rcu_sched(struct rcu_head *head, rcu_callback_t func);
-void synchronize_sched(void);
+void call_rcu(struct rcu_head *head, rcu_callback_t func);
 void rcu_barrier_tasks(void);
+void synchronize_rcu(void);
 
 static inline void call_rcu_bh(struct rcu_head *head, rcu_callback_t func)
 {
@@ -74,7 +68,6 @@ static inline void call_rcu_bh(struct rcu_head *head, rcu_callback_t func)
 
 void __rcu_read_lock(void);
 void __rcu_read_unlock(void);
-void synchronize_rcu(void);
 
 /*
  * Defined as a macro as it is a very low level header included from
