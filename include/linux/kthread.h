@@ -199,14 +199,12 @@ void kthread_destroy_worker(struct kthread_worker *worker);
 
 struct cgroup_subsys_state;
 
-#ifdef CONFIG_BLK_CGROUP
-void kthread_associate_blkcg(struct cgroup_subsys_state *css);
-struct cgroup_subsys_state *kthread_blkcg(void);
-#else
-static inline void kthread_associate_blkcg(struct cgroup_subsys_state *css) { }
-static inline struct cgroup_subsys_state *kthread_blkcg(void)
+extern struct kthread_worker kthread_global_worker;
+void kthread_init_global_worker(void);
+
+static inline bool kthread_schedule_work(struct kthread_work *work)
 {
-	return NULL;
+	return kthread_queue_work(&kthread_global_worker, work);
 }
-#endif
+
 #endif /* _LINUX_KTHREAD_H */
