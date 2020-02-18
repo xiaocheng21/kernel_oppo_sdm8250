@@ -136,4 +136,5 @@ all.config
 # fetched Android config fragments
 kernel/configs/android-*.cfg
 
-
+Android.bp
+>>>>>>> 55a88b3f528a (headers_lib: rename Android.bp)
