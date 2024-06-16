@@ -1,0 +1,1 @@
+/home/lip/oppo/android_kernel_modules_and_devicetree_oppo_sm8250/vendor/qcom/opensource/audio-kernel/include/soc/internal.h
