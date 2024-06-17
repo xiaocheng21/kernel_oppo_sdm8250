@@ -38,7 +38,7 @@ source "drivers/soc/oplus/sensor/Kconfig"
 #endif /* OPLUS_FEATURE_SENSOR_SMEM */
 
 #ifdef OPLUS_FEATURE_ESIM
-source "drivers/soc/oplus/misc/Kconfig"
+source "drivers/misc/Kconfig"
 #endif /* OPLUS_FEATURE_ESIM */
 
 #ifdef OPLUS_FEATURE_TPP
