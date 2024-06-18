@@ -22,4 +22,3 @@ obj-$(CONFIG_HORAE_THERMAL_SHELL) += thermal/
 #ifdef OPLUS_FEATURE_GPIO_NC
 obj-$(CONFIG_OPLUS_GPIO_NC) +=  oplus_gpio/
 #endif
-

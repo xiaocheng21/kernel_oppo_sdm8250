@@ -1,0 +1,20 @@
+symlink adress:
+oplus_performance ->source/kernel
+secureguard ->source/kernel
+network -> source/net/network
+touchpanel -> source/drivers/touchpanel
+colorctrl -> source/drivers/colorctrl
+vibrator-> source/drivers/vibrator
+misc -> source/drivers/misc/misc
+ufs ->source/fs/ufs
+secure -> source/drivers/secure
+charger -> source/drivers/charger
+device_info -> source/drivers/device_info
+midas ->source/drivers/power/midas
+wakelock_profiler -> source/drivers/wakelock_profiler
+sensor -> source/drivers/sensor
+system -> source/drivers/system
+thermal ->source/drivers/thermal/thermal
+ext4 -> source/fs/ext4
+all fs -> source/fs
+secureguard -> source/kernel/secureguard
