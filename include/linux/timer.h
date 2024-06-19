@@ -225,5 +225,5 @@ int timers_dead_cpu(unsigned int cpu);
 #define timers_prepare_cpu	NULL
 #define timers_dead_cpu		NULL
 #endif
-
+#endif
 #endif
