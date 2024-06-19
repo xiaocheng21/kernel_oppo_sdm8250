@@ -208,6 +208,7 @@ struct compact_control {
 	unsigned long free_pfn;		/* isolate_freepages search base */
 	unsigned long migrate_pfn;	/* isolate_migratepages search base */
 	unsigned long fast_start_pfn;	/* a pfn to start linear scan from */
+	unsigned long last_migrated_pfn;/* Not yet flushed page being freed */
 	struct zone *zone;
 	unsigned long total_migrate_scanned;
 	unsigned long total_free_scanned;

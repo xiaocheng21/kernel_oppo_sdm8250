@@ -1025,6 +1025,7 @@ isolate_fail:
 			}
 			putback_movable_pages(&cc->migratepages);
 			cc->nr_migratepages = 0;
+			cc->last_migrated_pfn = 0;
 			nr_isolated = 0;
 		}
 
@@ -2187,7 +2188,7 @@ compact_zone(struct compact_control *cc, struct capture_control *capc)
 			cc->whole_zone = true;
 	}
 
-	last_migrated_pfn = 0;
+	cc->last_migrated_pfn = 0;
 
 	/*
 	 * Migrate has separate cached PFNs for ASYNC and SYNC* migration on
@@ -2207,7 +2208,6 @@ compact_zone(struct compact_control *cc, struct capture_control *capc)
 
 	while ((ret = compact_finished(cc)) == COMPACT_CONTINUE) {
 		int err;
-		unsigned long start_pfn = cc->migrate_pfn;
 
 		/*
 		 * Avoid multiple rescans which can happen if a page cannot be
@@ -2228,7 +2228,6 @@ compact_zone(struct compact_control *cc, struct capture_control *capc)
 			ret = COMPACT_CONTENDED;
 			putback_movable_pages(&cc->migratepages);
 			cc->nr_migratepages = 0;
-			last_migrated_pfn = 0;
 			goto out;
 		case ISOLATE_NONE:
 			if (update_cached) {
@@ -2276,7 +2275,8 @@ compact_zone(struct compact_control *cc, struct capture_control *capc)
 				cc->migrate_pfn = block_end_pfn(
 						cc->migrate_pfn - 1, cc->order);
 				/* Draining pcplists is useless in this case */
-				last_migrated_pfn = 0;
+				cc->last_migrated_pfn = 0;
+
 			}
 		}
 
@@ -2288,7 +2288,7 @@ check_drain:
 		 * compact_finished() can detect immediately if allocation
 		 * would succeed.
 		 */
-		if (cc->order > 0 && last_migrated_pfn) {
+		if (cc->order > 0 && cc->last_migrated_pfn) {
 			int cpu;
 			unsigned long current_block_start =
 				block_start_pfn(cc->migrate_pfn, cc->order);
@@ -2301,7 +2301,7 @@ check_drain:
 				drain_local_pages(zone);
 				put_cpu_light();
 				/* No more flushing until we migrate again */
-				last_migrated_pfn = 0;
+				cc->last_migrated_pfn = 0;
 			}
 		}
 
