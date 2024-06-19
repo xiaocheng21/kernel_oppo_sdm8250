@@ -1883,7 +1883,7 @@ static void task_numa_compare(struct task_numa_env *env,
 	 * be incurred if the tasks were swapped.
 	 */
 	/* Skip this swap candidate if cannot move to the source cpu */
-	if (!cpumask_test_cpu(env->src_cpu, &cur->cpus_allowed))
+	if (!cpumask_test_cpu(env->src_cpu, cur->cpus_ptr))
 		goto unlock;
 
 	/*
@@ -1981,7 +1981,7 @@ static void task_numa_find_cpu(struct task_numa_env *env,
 
 	for_each_cpu(cpu, cpumask_of_node(env->dst_nid)) {
 		/* Skip this CPU if the source task cannot migrate */
-		if (!cpumask_test_cpu(cpu, &env->p->cpus_allowed))
+		if (!cpumask_test_cpu(cpu, env->p->cpus_ptr))
 			continue;
 
 		env->dst_cpu = cpu;
@@ -4546,7 +4546,7 @@ check_preempt_tick(struct cfs_rq *cfs_rq, struct sched_entity *curr)
 #endif
 
 	if (delta_exec > ideal_runtime) {
-		resched_curr(rq_of(cfs_rq));
+		resched_curr_lazy(rq_of(cfs_rq));
 		/*
 		 * The current task ran long enough, ensure it doesn't get
 		 * re-elected due to buddy favours.
@@ -4574,7 +4574,7 @@ check_preempt_tick(struct cfs_rq *cfs_rq, struct sched_entity *curr)
 		return;
 
 	if (delta > ideal_runtime)
-		resched_curr(rq_of(cfs_rq));
+		resched_curr_lazy(rq_of(cfs_rq));
 }
 
 static void
@@ -4729,7 +4729,7 @@ entity_tick(struct cfs_rq *cfs_rq, struct sched_entity *curr, int queued)
 	 * validating it and just reschedule.
 	 */
 	if (queued) {
-		resched_curr(rq_of(cfs_rq));
+		resched_curr_lazy(rq_of(cfs_rq));
 		return;
 	}
 	/*
@@ -4863,7 +4863,7 @@ static void __account_cfs_rq_runtime(struct cfs_rq *cfs_rq, u64 delta_exec)
 	 * hierarchy can be throttled
 	 */
 	if (!assign_cfs_rq_runtime(cfs_rq) && likely(cfs_rq->curr))
-		resched_curr(rq_of(cfs_rq));
+		resched_curr_lazy(rq_of(cfs_rq));
 }
 
 static __always_inline
@@ -5063,7 +5063,7 @@ static u64 distribute_cfs_runtime(struct cfs_bandwidth *cfs_b, u64 remaining)
 		struct rq *rq = rq_of(cfs_rq);
 		struct rq_flags rf;
 
-		rq_lock(rq, &rf);
+		rq_lock_irqsave(rq, &rf);
 		if (!cfs_rq_throttled(cfs_rq))
 			goto next;
 
@@ -5082,7 +5082,7 @@ static u64 distribute_cfs_runtime(struct cfs_bandwidth *cfs_b, u64 remaining)
 			unthrottle_cfs_rq(cfs_rq);
 
 next:
-		rq_unlock(rq, &rf);
+		rq_unlock_irqrestore(rq, &rf);
 
 		if (!remaining)
 			break;
@@ -5098,7 +5098,7 @@ next:
  * period the timer is deactivated until scheduling resumes; cfs_b->idle is
  * used to track this state.
  */
-static int do_sched_cfs_period_timer(struct cfs_bandwidth *cfs_b, int overrun)
+static int do_sched_cfs_period_timer(struct cfs_bandwidth *cfs_b, int overrun, unsigned long flags)
 {
 	u64 runtime;
 	int throttled;
@@ -5138,10 +5138,10 @@ static int do_sched_cfs_period_timer(struct cfs_bandwidth *cfs_b, int overrun)
 	while (throttled && cfs_b->runtime > 0 && !cfs_b->distribute_running) {
 		runtime = cfs_b->runtime;
 		cfs_b->distribute_running = 1;
-		raw_spin_unlock(&cfs_b->lock);
+		raw_spin_unlock_irqrestore(&cfs_b->lock, flags);
 		/* we can't nest cfs_b->lock while distributing bandwidth */
 		runtime = distribute_cfs_runtime(cfs_b, runtime);
-		raw_spin_lock(&cfs_b->lock);
+		raw_spin_lock_irqsave(&cfs_b->lock, flags);
 
 		cfs_b->distribute_running = 0;
 		throttled = !list_empty(&cfs_b->throttled_cfs_rq);
@@ -5249,16 +5249,17 @@ static __always_inline void return_cfs_rq_runtime(struct cfs_rq *cfs_rq)
 static void do_sched_cfs_slack_timer(struct cfs_bandwidth *cfs_b)
 {
 	u64 runtime = 0, slice = sched_cfs_bandwidth_slice();
+	unsigned long flags;
 
 	/* confirm we're still not at a refresh boundary */
-	raw_spin_lock(&cfs_b->lock);
+	raw_spin_lock_irqsave(&cfs_b->lock, flags);
 	if (cfs_b->distribute_running) {
-		raw_spin_unlock(&cfs_b->lock);
+		raw_spin_unlock_irqrestore(&cfs_b->lock, flags);
 		return;
 	}
 
 	if (runtime_refresh_within(cfs_b, min_bandwidth_expiration)) {
-		raw_spin_unlock(&cfs_b->lock);
+		raw_spin_unlock_irqrestore(&cfs_b->lock, flags);
 		return;
 	}
 
@@ -5268,17 +5269,17 @@ static void do_sched_cfs_slack_timer(struct cfs_bandwidth *cfs_b)
 	if (runtime)
 		cfs_b->distribute_running = 1;
 
-	raw_spin_unlock(&cfs_b->lock);
+	raw_spin_unlock_irqrestore(&cfs_b->lock, flags);
 
 	if (!runtime)
 		return;
 
 	runtime = distribute_cfs_runtime(cfs_b, runtime);
 
-	raw_spin_lock(&cfs_b->lock);
+	raw_spin_lock_irqsave(&cfs_b->lock, flags);
 	cfs_b->runtime -= min(runtime, cfs_b->runtime);
 	cfs_b->distribute_running = 0;
-	raw_spin_unlock(&cfs_b->lock);
+	raw_spin_unlock_irqrestore(&cfs_b->lock, flags);
 }
 
 /*
@@ -5358,11 +5359,12 @@ static enum hrtimer_restart sched_cfs_period_timer(struct hrtimer *timer)
 {
 	struct cfs_bandwidth *cfs_b =
 		container_of(timer, struct cfs_bandwidth, period_timer);
+	unsigned long flags;
 	int overrun;
 	int idle = 0;
 	int count = 0;
 
-	raw_spin_lock(&cfs_b->lock);
+	raw_spin_lock_irqsave(&cfs_b->lock, flags);
 	for (;;) {
 		overrun = hrtimer_forward_now(timer, cfs_b->period);
 		if (!overrun)
@@ -5398,11 +5400,11 @@ static enum hrtimer_restart sched_cfs_period_timer(struct hrtimer *timer)
 			count = 0;
 		}
 
-		idle = do_sched_cfs_period_timer(cfs_b, overrun);
+		idle = do_sched_cfs_period_timer(cfs_b, overrun, flags);
 	}
 	if (idle)
 		cfs_b->period_active = 0;
-	raw_spin_unlock(&cfs_b->lock);
+	raw_spin_unlock_irqrestore(&cfs_b->lock, flags);
 
 	return idle ? HRTIMER_NORESTART : HRTIMER_RESTART;
 }
@@ -5577,7 +5579,7 @@ static void hrtick_start_fair(struct rq *rq, struct task_struct *p)
 
 		if (delta < 0) {
 			if (rq->curr == p)
-				resched_curr(rq);
+				resched_curr_lazy(rq);
 			return;
 		}
 		hrtick_start(rq, delta);
@@ -6470,7 +6472,7 @@ find_idlest_group(struct sched_domain *sd, struct task_struct *p,
 
 		/* Skip over this group if it has no CPUs allowed */
 		if (!cpumask_intersects(sched_group_span(group),
-					&p->cpus_allowed))
+					p->cpus_ptr))
 			continue;
 
 		local_group = cpumask_test_cpu(this_cpu,
@@ -6602,7 +6604,7 @@ find_idlest_group_cpu(struct sched_group *group, struct task_struct *p, int this
 		return cpumask_first(sched_group_span(group));
 
 	/* Traverse only the allowed CPUs */
-	for_each_cpu_and(i, sched_group_span(group), &p->cpus_allowed) {
+	for_each_cpu_and(i, sched_group_span(group), p->cpus_ptr) {
 		if (available_idle_cpu(i)) {
 			struct rq *rq = cpu_rq(i);
 			struct cpuidle_state *idle = idle_get_state(rq);
@@ -6642,7 +6644,7 @@ static inline int find_idlest_cpu(struct sched_domain *sd, struct task_struct *p
 {
 	int new_cpu = cpu;
 
-	if (!cpumask_intersects(sched_domain_span(sd), &p->cpus_allowed))
+	if (!cpumask_intersects(sched_domain_span(sd), p->cpus_ptr))
 		return prev_cpu;
 
 	/*
@@ -6759,7 +6761,7 @@ static int select_idle_core(struct task_struct *p, struct sched_domain *sd, int 
 	if (!test_idle_cores(target, false))
 		return -1;
 
-	cpumask_and(cpus, sched_domain_span(sd), &p->cpus_allowed);
+	cpumask_and(cpus, sched_domain_span(sd), p->cpus_ptr);
 
 	for_each_cpu_wrap(core, cpus, target) {
 		bool idle = true;
@@ -6793,7 +6795,7 @@ static int select_idle_smt(struct task_struct *p, struct sched_domain *sd, int t
 		return -1;
 
 	for_each_cpu(cpu, cpu_smt_mask(target)) {
-		if (!cpumask_test_cpu(cpu, &p->cpus_allowed))
+		if (!cpumask_test_cpu(cpu, p->cpus_ptr))
 			continue;
 		if (available_idle_cpu(cpu))
 			return cpu;
@@ -6856,7 +6858,7 @@ static int select_idle_cpu(struct task_struct *p, struct sched_domain *sd, int t
 	for_each_cpu_wrap(cpu, sched_domain_span(sd), target) {
 		if (!--nr)
 			return -1;
-		if (!cpumask_test_cpu(cpu, &p->cpus_allowed))
+		if (!cpumask_test_cpu(cpu, p->cpus_ptr))
 			continue;
 		if (cpu_isolated(cpu))
 			continue;
@@ -6896,7 +6898,7 @@ static int select_idle_sibling(struct task_struct *p, int prev, int target)
 	    recent_used_cpu != target &&
 	    cpus_share_cache(recent_used_cpu, target) &&
 	    available_idle_cpu(recent_used_cpu) &&
-	    cpumask_test_cpu(p->recent_used_cpu, &p->cpus_allowed)) {
+	    cpumask_test_cpu(p->recent_used_cpu, p->cpus_ptr)) {
 		/*
 		 * Replace recent_used_cpu with prev as it is a potential
 		 * candidate for the next wake:
@@ -8312,6 +8314,11 @@ select_task_rq_fair(struct task_struct *p, int prev_cpu, int sd_flag, int wake_f
 			new_cpu = prev_cpu;
 		rcu_read_unlock();
 		return new_cpu;
+	
+	if (sd_flag & SD_BALANCE_WAKE) {
+		record_wakee(p);
+		want_affine = !wake_wide(p) && !wake_cap(p, cpu, prev_cpu)
+			      && cpumask_test_cpu(cpu, p->cpus_ptr);
 	}
 
 	if (sd_flag & SD_BALANCE_WAKE) {
@@ -8609,7 +8616,7 @@ static void check_preempt_wakeup(struct rq *rq, struct task_struct *p, int wake_
 	return;
 
 preempt:
-	resched_curr(rq);
+	resched_curr_lazy(rq);
 	/*
 	 * Only set the backward buddy when the current task is still
 	 * on the rq. This can happen when a wakeup gets interleaved
@@ -9145,7 +9152,7 @@ int can_migrate_task(struct task_struct *p, struct lb_env *env)
 	/*
 	 * We do not migrate tasks that are:
 	 * 1) throttled_lb_pair, or
-	 * 2) cannot be migrated to this CPU due to cpus_allowed, or
+	 * 2) cannot be migrated to this CPU due to cpus_ptr, or
 	 * 3) running (obviously), or
 	 * 4) are cache-hot on their current CPU.
 	 */
@@ -9162,7 +9169,7 @@ int can_migrate_task(struct task_struct *p, struct lb_env *env)
 			!is_min_capacity_cpu(env->src_cpu))
 		return 0;
 
-	if (!cpumask_test_cpu(env->dst_cpu, &p->cpus_allowed)) {
+	if (!cpumask_test_cpu(env->dst_cpu, p->cpus_ptr)) {
 		int cpu;
 
 		schedstat_inc(p->se.statistics.nr_failed_migrations_affine);
@@ -9182,7 +9189,7 @@ int can_migrate_task(struct task_struct *p, struct lb_env *env)
 
 		/* Prevent to re-select dst_cpu via env's CPUs: */
 		for_each_cpu_and(cpu, env->dst_grpmask, env->cpus) {
-			if (cpumask_test_cpu(cpu, &p->cpus_allowed)) {
+			if (cpumask_test_cpu(cpu, p->cpus_ptr)) {
 				env->flags |= LBF_DST_PINNED;
 				env->new_dst_cpu = cpu;
 				break;
@@ -9943,7 +9950,7 @@ check_cpu_capacity(struct rq *rq, struct sched_domain *sd)
 
 /*
  * Group imbalance indicates (and tries to solve) the problem where balancing
- * groups is inadequate due to ->cpus_allowed constraints.
+ * groups is inadequate due to ->cpus_ptr constraints.
  *
  * Imagine a situation of two groups of 4 CPUs each and 4 tasks each with a
  * cpumask covering 1 CPU of the first group and 3 CPUs of the second group.
@@ -10824,7 +10831,7 @@ static struct sched_group *find_busiest_group(struct lb_env *env)
 	/*
 	 * If the busiest group is imbalanced the below checks don't
 	 * work because they assume all things are equal, which typically
-	 * isn't true due to cpus_allowed constraints and the like.
+	 * isn't true due to cpus_ptr constraints and the like.
 	 */
 	if (busiest->group_type == group_imbalanced)
 		goto force_balance;
@@ -11342,8 +11349,7 @@ no_move:
 			 * if the curr task on busiest CPU can't be
 			 * moved to this_cpu:
 			 */
-			if (!cpumask_test_cpu(this_cpu,
-						&busiest->curr->cpus_allowed)
+			if (!cpumask_test_cpu(this_cpu, busiest->curr->cpus_ptr)
 				|| !can_migrate_boosted_task(busiest->curr,
 						cpu_of(busiest), this_cpu)) {
 				raw_spin_unlock_irqrestore(&busiest->lock,
@@ -12565,7 +12571,7 @@ static void task_fork_fair(struct task_struct *p)
 		 * 'current' within the tree based on its new key value.
 		 */
 		swap(curr->vruntime, se->vruntime);
-		resched_curr(rq);
+		resched_curr_lazy(rq);
 	}
 
 	se->vruntime -= cfs_rq->min_vruntime;
@@ -12589,7 +12595,7 @@ prio_changed_fair(struct rq *rq, struct task_struct *p, int oldprio)
 	 */
 	if (rq->curr == p) {
 		if (p->prio > oldprio)
-			resched_curr(rq);
+			resched_curr_lazy(rq);
 	} else
 		check_preempt_curr(rq, p, 0);
 }

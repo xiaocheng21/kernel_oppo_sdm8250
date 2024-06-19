@@ -190,6 +190,8 @@ extern struct timer_base timer_base_deferrable;
 # define del_timer_sync(t)		del_timer(t)
 #endif
 
+#if defined(CONFIG_SMP) || defined(CONFIG_PREEMPT_RT_FULL)
+
 #define del_singleshot_timer_sync(t) del_timer_sync(t)
 
 extern void init_timers(void);

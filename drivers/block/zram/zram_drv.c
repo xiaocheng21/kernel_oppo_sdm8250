@@ -62,6 +62,40 @@ static int zram_bvec_read(struct zram *zram, struct bio_vec *bvec,
 unsigned long znr_swap_pages;
 bool is_enable_zlimit;
 
+#ifdef CONFIG_PREEMPT_RT_BASE
+static void zram_meta_init_table_locks(struct zram *zram, size_t num_pages)
+{
+	size_t index;
+
+	for (index = 0; index < num_pages; index++)
+		spin_lock_init(&zram->table[index].lock);
+}
+
+static int zram_slot_trylock(struct zram *zram, u32 index)
+{
+	int ret;
+
+	ret = spin_trylock(&zram->table[index].lock);
+	if (ret)
+		__set_bit(ZRAM_LOCK, &zram->table[index].value);
+	return ret;
+}
+
+static void zram_slot_lock(struct zram *zram, u32 index)
+{
+	spin_lock(&zram->table[index].lock);
+	__set_bit(ZRAM_LOCK, &zram->table[index].value);
+}
+
+static void zram_slot_unlock(struct zram *zram, u32 index)
+{
+	__clear_bit(ZRAM_LOCK, &zram->table[index].value);
+	spin_unlock(&zram->table[index].lock);
+}
+
+#else
+static void zram_meta_init_table_locks(struct zram *zram, size_t num_pages) { }
+
 static int zram_slot_trylock(struct zram *zram, u32 index)
 {
 	return bit_spin_trylock(ZRAM_LOCK, &zram->table[index].flags);
@@ -76,6 +110,60 @@ static void zram_set_entry(struct zram *zram, u32 index,
 			struct zram_entry *entry)
 {
 	zram->table[index].entry = entry;
+	bit_spin_unlock(ZRAM_LOCK, &zram->table[index].value);
+}
+#endif
+
+static inline bool init_done(struct zram *zram)
+{
+	return zram->disksize;
+}
+
+static inline bool zram_allocated(struct zram *zram, u32 index)
+{
+
+	return (zram->table[index].value >> (ZRAM_FLAG_SHIFT + 1)) ||
+					zram->table[index].handle;
+}
+
+static inline struct zram *dev_to_zram(struct device *dev)
+{
+	return (struct zram *)dev_to_disk(dev)->private_data;
+}
+
+static unsigned long zram_get_handle(struct zram *zram, u32 index)
+{
+	return zram->table[index].handle;
+}
+
+static void zram_set_handle(struct zram *zram, u32 index, unsigned long handle)
+{
+	zram->table[index].handle = handle;
+}
+
+/* flag operations require table entry bit_spin_lock() being held */
+static bool zram_test_flag(struct zram *zram, u32 index,
+			enum zram_pageflags flag)
+{
+	return zram->table[index].value & BIT(flag);
+}
+
+static void zram_set_flag(struct zram *zram, u32 index,
+			enum zram_pageflags flag)
+{
+	zram->table[index].value |= BIT(flag);
+}
+
+static void zram_clear_flag(struct zram *zram, u32 index,
+			enum zram_pageflags flag)
+{
+	zram->table[index].value &= ~BIT(flag);
+}
+
+static inline void zram_set_element(struct zram *zram, u32 index,
+			unsigned long element)
+{
+	zram->table[index].element = element;
 }
 
 static unsigned long zram_get_element(struct zram *zram, u32 index)
@@ -1229,6 +1317,7 @@ static bool zram_meta_alloc(struct zram *zram, u64 disksize)
 		return false;
 	}
 
+	zram_meta_init_table_locks(zram, num_pages);
 	return true;
 }
 
@@ -1434,6 +1523,7 @@ static int __zram_bvec_read(struct zram *zram, struct page *page, u32 index,
 	struct zram_entry *entry;
 	unsigned int size;
 	void *src, *dst;
+	struct zcomp_strm *zstrm;
 
 	zram_slot_lock(zram, index);
 #ifdef CONFIG_HYBRIDSWAP_ASYNC_COMPRESS
@@ -1488,12 +1578,10 @@ static int __zram_bvec_read(struct zram *zram, struct page *page, u32 index,
 		kunmap_atomic(dst);
 		ret = 0;
 	} else {
-		struct zcomp_strm *zstrm = zcomp_stream_get(zram->comp);
 
 		dst = kmap_atomic(page);
 		ret = zcomp_decompress(zstrm, src, size, dst);
 		kunmap_atomic(dst);
-		zcomp_stream_put(zram->comp);
 	}
 	zs_unmap_object(zram->mem_pool, zram_entry_handle(zram, entry));
 	zram_slot_unlock(zram, index);

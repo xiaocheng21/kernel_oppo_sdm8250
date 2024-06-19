@@ -85,6 +85,10 @@ struct zram_table_entry {
 #endif
 	};
 	unsigned long flags;
+	unsigned long value;
+#ifdef CONFIG_PREEMPT_RT_BASE
+	spinlock_t lock;
+#endif
 #ifdef CONFIG_ZRAM_MEMORY_TRACKING
 	ktime_t ac_time;
 #endif
