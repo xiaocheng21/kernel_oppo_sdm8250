@@ -491,10 +491,6 @@ void __wake_up_q(struct wake_q_head *head, bool sleeper)
 		 * the queueing in wake_q_add() so as not to miss wakeups.
 		 */
 		try_to_wake_up(task, TASK_NORMAL, 0, head->count);
-		if (sleeper)
-			wake_up_lock_sleeper(task);
-		else
-			wake_up_process(task);
 		put_task_struct(task);
 	}
 }
@@ -3010,17 +3006,6 @@ int wake_up_process(struct task_struct *p)
 }
 EXPORT_SYMBOL(wake_up_process);
 
-/**
- * wake_up_lock_sleeper - Wake up a specific process blocked on a "sleeping lock"
- * @p: The process to be woken up.
- *
- * Same as wake_up_process() above, but wake_flags=WF_LOCK_SLEEPER to indicate
- * the nature of the wakeup.
- */
-int wake_up_lock_sleeper(struct task_struct *p)
-{
-	return try_to_wake_up(p, TASK_UNINTERRUPTIBLE, WF_LOCK_SLEEPER);
-}
 
 int wake_up_state(struct task_struct *p, unsigned int state)
 {
@@ -9123,7 +9108,7 @@ void migrate_enable(void)
 
 		rq = task_rq_lock(p, &rf);
 		update_rq_clock(rq);
-		arg->dest_cpu = select_fallback_rq(cpu, p);
+		arg->dest_cpu = select_fallback_rq(cpu, p, allow_isolated);
 		task_rq_unlock(rq, p, &rf);
 
 		stop_one_cpu_nowait(task_cpu(p), migration_cpu_stop,
